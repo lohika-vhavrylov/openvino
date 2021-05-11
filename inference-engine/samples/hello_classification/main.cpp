@@ -26,46 +26,7 @@ using namespace InferenceEngine;
 #define ClassificationResult_t ClassificationResult
 #endif
 
-#if defined(ENABLE_UNICODE_PATH_SUPPORT) && defined(_WIN32)
-cv::Mat imreadW(std::wstring input_image_path) {
-    cv::Mat image;
-    std::ifstream input_image_stream;
-    input_image_stream.open(
-        input_image_path.c_str(),
-        std::iostream::binary | std::ios_base::ate | std::ios_base::in);
-    if (input_image_stream.is_open()) {
-        if (input_image_stream.good()) {
-            input_image_stream.seekg(0, std::ios::end);
-            std::size_t file_size = input_image_stream.tellg();
-            input_image_stream.seekg(0, std::ios::beg);
-            std::vector<char> buffer(0);
-            std::copy(
-                std::istreambuf_iterator<char>(input_image_stream),
-                std::istreambuf_iterator<char>(),
-                std::back_inserter(buffer));
-            image = cv::imdecode(cv::Mat(1, file_size, CV_8UC1, &buffer[0]), cv::IMREAD_COLOR);
-        } else {
-            tcout << "Input file '" << input_image_path << "' processing error" << std::endl;
-        }
-        input_image_stream.close();
-    } else {
-        tcout << "Unable to read input file '" << input_image_path << "'" << std::endl;
-    }
-    return image;
-}
-
-std::string simpleConvert(const std::wstring & wstr) {
-    std::string str;
-    for (auto && wc : wstr)
-        str += static_cast<char>(wc);
-    return str;
-}
-
-int wmain(int argc, wchar_t *argv[]) {
-#else
-
 int main(int argc, char *argv[]) {
-#endif
     try {
         // ------------------------------ Parsing and validation of input args ---------------------------------
         if (argc != 4) {
@@ -75,11 +36,7 @@ int main(int argc, char *argv[]) {
 
         const file_name_t input_model{argv[1]};
         const file_name_t input_image_path{argv[2]};
-#if defined(ENABLE_UNICODE_PATH_SUPPORT) && defined(_WIN32)
-        const std::string device_name = simpleConvert(argv[3]);
-#else
         const std::string device_name{argv[3]};
-#endif
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 1. Load inference engine instance -------------------------------------
@@ -88,6 +45,7 @@ int main(int argc, char *argv[]) {
 
         // 2. Read a model in OpenVINO Intermediate Representation (.xml and .bin files) or ONNX (.onnx file) format
         CNNNetwork network = ie.ReadNetwork(input_model);
+
         if (network.getOutputsInfo().size() != 1) throw std::logic_error("Sample supports topologies with 1 output only");
         if (network.getInputsInfo().size() != 1) throw std::logic_error("Sample supports topologies with 1 input only");
         // -----------------------------------------------------------------------------------------------------
@@ -100,9 +58,9 @@ int main(int argc, char *argv[]) {
         /* Mark input as resizable by setting of a resize algorithm.
          * In this case we will be able to set an input blob of any shape to an infer request.
          * Resize and layout conversions are executed automatically during inference */
-        input_info->getPreProcess().setResizeAlgorithm(RESIZE_BILINEAR);
-        input_info->setLayout(Layout::NHWC);
-        input_info->setPrecision(Precision::U8);
+        //input_info->getPreProcess().setResizeAlgorithm(RESIZE_BILINEAR);
+        input_info->setLayout(Layout::NCHW);
+        input_info->setPrecision(Precision::FP32);
 
         // --------------------------- Prepare output blobs ----------------------------------------------------
         DataPtr output_info = network.getOutputsInfo().begin()->second;
@@ -119,29 +77,89 @@ int main(int argc, char *argv[]) {
         InferRequest infer_request = executable_network.CreateInferRequest();
         // -----------------------------------------------------------------------------------------------------
 
-        // --------------------------- 6. Prepare input --------------------------------------------------------
-        /* Read input image to a blob and set it to an infer request without resize and layout conversions. */
-        cv::Mat image = imread_t(input_image_path);
-        Blob::Ptr imgBlob = wrapMat2Blob(image);  // just wrap Mat data by Blob::Ptr without allocating of new memory
-        infer_request.SetBlob(input_name, imgBlob);  // infer_request accepts input blob of any size
+        // --------------------------- 6. Prepare input
+        float data[] = {-1.f, -2.f, +4.f, -5.f,  //
+                        -7.f, +3.f, -8.f, -9.f,  //
+                        -1.f, -2.f, -4.f, +5.f,  //
+                        -7.f, -3.f, +8.f, -9.f,  //
+                        //
+                        -1.f, +2.f, -4.f, -5.f,  //
+                        +7.f, -3.f, -8.f, +9.f,  //
+                        -1.f, -2.f, +4.f, -5.f,  //
+                        -7.f, +3.f, -8.f, -9.f,  //
+                        //
+                        -1.f, -2.f, -4.f, +5.f,  //
+                        -7.f, -3.f, +8.f, -9.f,  //
+                        -1.f, +2.f, -4.f, -5.f,  //
+                        +7.f, -3.f, -8.f, +9.f};
+
+        InferenceEngine::TensorDesc tDesc(InferenceEngine::Precision::FP32,
+                                          {1, 3, 4, 4},
+                                          InferenceEngine::Layout::NCHW);
+
+        Blob::Ptr imgBlob =
+            InferenceEngine::make_shared_blob<float>(tDesc, data);
+
+        const size_t in_size = imgBlob->size();
+        auto in_dims = imgBlob->getTensorDesc().getDims();
+        tcout << "Input elements "  // << in_size
+              << std::endl;
+        for (size_t i = 0; i < in_size; ++i) {
+            tcout << (data[i] < 0 ? " " : "  ") << data[i];
+            if ((i + 1) % in_dims[2] == 0 && i > 0) {
+                tcout << std::endl;
+                if ((i + 1) % (in_dims[2] * in_dims[3]) == 0 && i > 0) {
+                    tcout << std::endl;
+                }
+            }
+        }
+
+        infer_request.SetBlob(
+            input_name,
+            imgBlob); // infer_request accepts input blob of any size
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 7. Do inference --------------------------------------------------------
         /* Running the request synchronously */
-        infer_request.Infer();
+        auto start =  std::chrono::high_resolution_clock::now();
+
+        const auto iterations = 5000;
+        for (auto i{0}; i < iterations; i++) {
+          infer_request.Infer();
+        }
+        auto finish =  std::chrono::high_resolution_clock::now();
+
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 8. Process output ------------------------------------------------------
         Blob::Ptr output = infer_request.GetBlob(output_name);
-        // Print classification results
-        ClassificationResult_t classificationResult(output, {input_image_path});
-        classificationResult.print();
-        // -----------------------------------------------------------------------------------------------------
-    } catch (const std::exception & ex) {
-        std::cerr << ex.what() << std::endl;
-        return EXIT_FAILURE;
+        auto desc = output->getTensorDesc();
+        auto dims = desc.getDims();
+        // Expects dims to be of size 4
+
+        size_t out_size = output->size();
+        tcout << "Output elements "  // << out_size << ", expected " << in_size
+              << std::endl;
+        float *out_data = output.get()->buffer();
+        for (size_t i = 0; i < out_size; ++i) {
+          tcout << "  " << out_data[i];
+          if ((i + 1) % dims[2] == 0 && i > 0) {
+            tcout << std::endl;
+            if ((i + 1) % (dims[2] * dims[3]) == 0) {
+              tcout << std::endl;
+            }
+          }
+        }
+
+        std::cout << "\nAvg execution time (per " << iterations << " iterations): "
+                  << std::chrono::duration_cast<std::chrono::microseconds>(
+                         finish - start)
+                             .count() /
+                         (iterations)
+                  << " microseconds" << std::endl;
+    } catch (const std::exception &ex) {
+      std::cerr << ex.what() << std::endl;
+      return EXIT_FAILURE;
     }
-    std::cout << "This sample is an API example, for any performance measurements "
-                 "please use the dedicated benchmark_app tool" << std::endl;
     return EXIT_SUCCESS;
 }
