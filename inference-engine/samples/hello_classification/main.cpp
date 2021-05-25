@@ -12,6 +12,8 @@
 #include <samples/ocv_common.hpp>
 #include <samples/classification_results.h>
 
+#include <opencv2/core/hal/interface.h>
+
 using namespace InferenceEngine;
 
 #if defined(ENABLE_UNICODE_PATH_SUPPORT) && defined(_WIN32)
@@ -68,8 +70,8 @@ int main(int argc, char *argv[]) {
 #endif
     try {
         // ------------------------------ Parsing and validation of input args ---------------------------------
-        if (argc != 4) {
-            tcout << "Usage : " << argv[0] << " <path_to_model> <path_to_image> <device_name>" << std::endl;
+        if (argc != 5) {
+            tcout << "Usage : " << argv[0] << " <path_to_model> <path_to_image> <device_name> <iterations>" << std::endl;
             return EXIT_FAILURE;
         }
 
@@ -80,6 +82,7 @@ int main(int argc, char *argv[]) {
 #else
         const std::string device_name{argv[3]};
 #endif
+        const int iterations{std::stoi(argv[4])};
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 1. Load inference engine instance -------------------------------------
@@ -128,20 +131,54 @@ int main(int argc, char *argv[]) {
 
         // --------------------------- 7. Do inference --------------------------------------------------------
         /* Running the request synchronously */
-        infer_request.Infer();
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for (auto i{0}; i< iterations; ++i) {
+            infer_request.StartAsync();
+            infer_request.Wait(5000);
+        }
+
+        auto finish = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                            finish - start)
+                            .count();
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 8. Process output ------------------------------------------------------
+        // Print inference stats
+        tcout << "\nAverage inference time on " << iterations
+              << " iterations: " << duration / (iterations * 1000) << " msec"
+              << std::endl;
+
+        // Converting the result back to a CV mat:
         Blob::Ptr output = infer_request.GetBlob(output_name);
-        // Print classification results
-        ClassificationResult_t classificationResult(output, {input_image_path});
-        classificationResult.print();
+        const auto out_shape = output->getTensorDesc().getDims();
+        int height = static_cast<int>(out_shape[2]);
+        int width = static_cast<int>(out_shape[3]);
+        cv::Mat r_out{height, width, CV_32FC1, cv::Scalar(0)};
+        cv::Mat g_out{height, width, CV_32FC1, cv::Scalar(0)};
+        cv::Mat b_out{height, width, CV_32FC1, cv::Scalar(0)};
+        const auto channel_border = output->byteSize() / 3;
+        memcpy(r_out.data, static_cast<float *>(output->buffer()),
+               channel_border);
+        memcpy(g_out.data,
+               (static_cast<float *>(output->buffer()) +
+                channel_border / sizeof(float)),
+               channel_border);
+        memcpy(b_out.data,
+               (static_cast<float *>(output->buffer()) +
+                channel_border / sizeof(float) * 2),
+               channel_border);
+        cv::Mat out{height, width, CV_32FC3, cv::Scalar(100, 100, 100)};
+        cv::Mat a[] = {r_out, g_out, b_out};
+        cv::merge(a, 3, out);
+
+        cv::imwrite("output.png", out);
+
         // -----------------------------------------------------------------------------------------------------
     } catch (const std::exception & ex) {
         std::cerr << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
-    std::cout << "This sample is an API example, for any performance measurements "
-                 "please use the dedicated benchmark_app tool" << std::endl;
     return EXIT_SUCCESS;
 }
