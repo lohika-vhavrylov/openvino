@@ -80,3 +80,15 @@ static UNUSED InferenceEngine::Blob::Ptr wrapMat2Blob(const cv::Mat &mat) {
 
     return InferenceEngine::make_shared_blob<uint8_t>(tDesc, mat.data);
 }
+
+static UNUSED InferenceEngine::Blob::Ptr wrapFMat2Blob(const cv::Mat &mat) {
+    size_t channels = mat.channels();
+    size_t height = mat.size().height;
+    size_t width = mat.size().width;
+
+    InferenceEngine::TensorDesc tDesc(InferenceEngine::Precision::FP32,
+                                      {1, channels, height, width},
+                                      InferenceEngine::Layout::NHWC);
+
+    return InferenceEngine::make_shared_blob<float>(tDesc, reinterpret_cast<float*>(mat.data));
+}

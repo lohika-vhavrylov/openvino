@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
          * Resize and layout conversions are executed automatically during inference */
         input_info->getPreProcess().setResizeAlgorithm(RESIZE_BILINEAR);
         input_info->setLayout(Layout::NHWC);
-        input_info->setPrecision(Precision::U8);
+        input_info->setPrecision(Precision::FP32);
 
         // --------------------------- Prepare output blobs ----------------------------------------------------
         DataPtr output_info = network.getOutputsInfo().begin()->second;
@@ -120,14 +120,29 @@ int main(int argc, char *argv[]) {
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 6. Prepare input --------------------------------------------------------
+        using namespace std;
         /* Read input image to a blob and set it to an infer request without resize and layout conversions. */
         cv::Mat image = imread_t(input_image_path);
-        Blob::Ptr imgBlob = wrapMat2Blob(image);  // just wrap Mat data by Blob::Ptr without allocating of new memory
+        cv::Mat f_image;
+        image.convertTo(f_image, CV_32FC3, 1.);
+        Blob::Ptr imgBlob = wrapFMat2Blob(f_image);
+        // Blob::Ptr imgBlob = wrapMat2Blob(image);
         infer_request.SetBlob(input_name, imgBlob);  // infer_request accepts input blob of any size
-        // -----------------------------------------------------------------------------------------------------
+        tcout << "In shape " << endl;
+        for (auto dim : imgBlob->getTensorDesc().getDims()) {
+            tcout << dim << " ";
+        }
+        tcout << "imgBlob->size() " << imgBlob->size() << " ";
+        tcout << imgBlob->getTensorDesc().getPrecision() << " ";
+        tcout << imgBlob->getTensorDesc().getLayout() << endl;
 
         // --------------------------- 7. Do inference --------------------------------------------------------
         /* Running the request synchronously */
+        Blob::Ptr output_pre = infer_request.GetBlob(output_name);
+        // Print classification results
+        ClassificationResult_t classificationResult_pre(output_pre, {input_image_path});
+        classificationResult_pre.print();
+
         infer_request.Infer();
         // -----------------------------------------------------------------------------------------------------
 
