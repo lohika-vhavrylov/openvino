@@ -7,6 +7,7 @@
 #include <string>
 #include <iterator>
 #include <samples/common.hpp>
+#include <cstring>
 
 #include <inference_engine.hpp>
 #include <samples/ocv_common.hpp>
@@ -68,9 +69,11 @@ int main(int argc, char *argv[]) {
 #endif
     try {
         // ------------------------------ Parsing and validation of input args ---------------------------------
-        if (argc != 4) {
-            tcout << "Usage : " << argv[0] << " <path_to_model> <path_to_image> <device_name>" << std::endl;
-            return EXIT_FAILURE;
+        if (argc != 5) {
+          tcout << "Usage : " << argv[0]
+                << " <path_to_model> <path_to_image> <device_name> <iterations>"
+                << std::endl;
+          return EXIT_FAILURE;
         }
 
         const file_name_t input_model{argv[1]};
@@ -80,6 +83,7 @@ int main(int argc, char *argv[]) {
 #else
         const std::string device_name{argv[3]};
 #endif
+        const int iterations{std::stoi(argv[4])};
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 1. Load inference engine instance -------------------------------------
@@ -101,7 +105,7 @@ int main(int argc, char *argv[]) {
          * In this case we will be able to set an input blob of any shape to an infer request.
          * Resize and layout conversions are executed automatically during inference */
         input_info->getPreProcess().setResizeAlgorithm(RESIZE_BILINEAR);
-        input_info->setLayout(Layout::NHWC);
+        input_info->setLayout(Layout::NCHW);
         input_info->setPrecision(Precision::FP32);
 
         // --------------------------- Prepare output blobs ----------------------------------------------------
@@ -137,17 +141,36 @@ int main(int argc, char *argv[]) {
         tcout << imgBlob->getTensorDesc().getLayout() << endl;
 
         // --------------------------- 7. Do inference --------------------------------------------------------
-        /* Running the request synchronously */
-        Blob::Ptr output_pre = infer_request.GetBlob(output_name);
-        // Print classification results
-        ClassificationResult_t classificationResult_pre(output_pre, {input_image_path});
-        classificationResult_pre.print();
+        auto start = std::chrono::high_resolution_clock::now();
 
-        infer_request.Infer();
+        for (auto i{0}; i < iterations; ++i) {
+          infer_request.StartAsync();
+          infer_request.Wait(5000);
+        }
+
+        auto finish = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
+                            finish - start)
+                            .count();
+
         // -----------------------------------------------------------------------------------------------------
 
         // --------------------------- 8. Process output ------------------------------------------------------
         Blob::Ptr output = infer_request.GetBlob(output_name);
+
+        tcout << "Out shape " << endl;
+        auto out_shape = output->getTensorDesc().getDims();
+        for (auto dim : out_shape) {
+          tcout << dim << " ";
+        }
+        tcout << "output->size() " << output->size() << " ";
+        tcout << output->getTensorDesc().getPrecision() << " ";
+        tcout << output->getTensorDesc().getLayout() << endl;
+
+        tcout << "\nAverage inference time on " << iterations
+              << " iterations: " << duration / (iterations * 1000) << " msec"
+              << endl;
+
         // Print classification results
         ClassificationResult_t classificationResult(output, {input_image_path});
         classificationResult.print();
