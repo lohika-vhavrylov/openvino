@@ -1417,7 +1417,7 @@ TEST_P(IEClassLoadNetworkTest, QueryNetworkHETEROWithMULTINoThrow_V10) {
             }
         }
         auto function = multinputNetwork.getFunction();
-        ASSERT_NE(nullptr, function);
+        ASSERT_TRUE(nullptr != function);
         std::unordered_set<std::string> expectedLayers;
         for (auto &&node : function->get_ops()) {
             expectedLayers.emplace(node->get_friendly_name());
@@ -1452,7 +1452,7 @@ TEST_P(IEClassLoadNetworkTest, QueryNetworkMULTIWithHETERONoThrow_V10) {
             }
         }
         auto function = multinputNetwork.getFunction();
-        ASSERT_NE(nullptr, function);
+        ASSERT_TRUE(nullptr != function);
         std::unordered_set<std::string> expectedLayers;
         for (auto &&node : function->get_ops()) {
             expectedLayers.emplace(node->get_friendly_name());

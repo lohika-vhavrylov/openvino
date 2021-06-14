@@ -67,7 +67,7 @@ TEST_P(InferRequestTests,  CanCreateTwoExeNetworks) {
     InferenceEngine::ExecutableNetwork execNet;
     for (auto i = 0; i < 2; i++) {
         ASSERT_NO_THROW(execNet = ie->LoadNetwork(cnnNet, targetDevice, configuration));
-        ASSERT_NE(nullptr, cnnNet.getFunction());
+        ASSERT_TRUE(nullptr != cnnNet.getFunction());
     }
 }
 
